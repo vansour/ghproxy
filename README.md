@@ -54,7 +54,6 @@ docker run -d --name ghproxy -p 8080:8080 vansour/ghproxy:latest
 创建 `docker-compose.yml` 文件：
 
 ```yaml
-version: '3.8'
 services:
   ghproxy:
     image: vansour/ghproxy:latest
@@ -71,24 +70,11 @@ services:
 docker-compose up -d
 ```
 
-### 方式三：本地构建Docker
+### 方式三：一键安装到服务器（systemd）
 
-#### 系统要求
-- Docker 20.10+
-- Docker Compose 2.0+
-
-#### 构建步骤
 ```bash
-# 1. 下载代码
-git clone <repository-url>
-cd ghproxy
-
-# 2. 构建并启动服务
-./docker.sh build
-./docker.sh start
-
-# 3. 访问服务
-# Web界面: http://服务器IP:8080
+# 一键安装命令
+wget https://raw.githubusercontent.com/vansour/ghproxy/main/install.sh -O ghproxy.sh && chmod +x ./ghproxy.sh && ./ghproxy.sh
 ```
 
 ## 📖 使用方法
@@ -134,145 +120,3 @@ curl -X POST http://localhost:8080/api/generate \
   "git_command": "git clone http://localhost:8080/https://github.com/user/repo.git"
 }
 ```
-
-## 🔧 配置选项
-
-### 环境变量
-
-- `TZ`: 时区设置（默认: Asia/Shanghai）
-- `PORT`: 服务端口（默认: 8080）
-
-### Docker镜像版本
-
-- `latest`: 最新稳定版本（无超时限制）
-- `v1.1.0`: 无超时限制版本（推荐用于大文件传输）
-- `v1.0.0`: 基础版本（有超时限制）
-
-#### Docker管理命令
-```bash
-# 查看服务状态
-./docker.sh status
-
-# 查看日志
-./docker.sh logs
-
-# 重启服务
-./docker.sh restart
-
-# 停止服务
-./docker.sh stop
-
-# 更新服务
-./docker.sh update
-
-# 清理资源
-./docker.sh cleanup
-```
-
-### 方式二：系统服务部署
-
-#### 系统要求
-- Linux系统
-- Go 1.16+
-- systemd支持
-- root权限
-
-### 安装步骤
-
-1. **下载代码**
-```bash
-git clone <repository-url>
-cd ghproxy
-```
-
-2. **安装服务**
-```bash
-sudo ./install.sh install
-```
-
-3. **访问服务**
-- Web界面: http://服务器IP:8080
-- 直接代理: http://服务器IP:8080/完整的文件URL
-
-### 服务管理
-
-```bash
-# 查看服务状态
-sudo ./install.sh status
-
-# 启动服务
-sudo ./install.sh start
-
-# 停止服务
-sudo ./install.sh stop
-
-# 重启服务
-sudo ./install.sh restart
-
-# 查看实时日志
-sudo ./install.sh logs
-
-# 卸载服务
-sudo ./install.sh uninstall
-```
-
-## 使用方法
-
-### Web界面使用
-
-1. 打开浏览器访问 `http://服务器IP:8080`
-2. 在输入框中粘贴原始链接
-3. 点击"生成加速链接"
-4. 复制所需格式的链接使用
-
-### 直接代理使用
-
-将原始URL前面加上代理地址即可：
-
-```bash
-# 原始链接
-https://github.com/user/repo/blob/main/file.txt
-
-# 代理链接  
-http://你的服务器:8080/https://github.com/user/repo/blob/main/file.txt
-```
-
-### 命令行使用
-
-```bash
-# wget下载
-wget "http://你的服务器:8080/原始URL" -O 文件名
-
-# curl下载
-curl -L "http://你的服务器:8080/原始URL" -o 文件名
-
-# git clone (仅支持仓库链接)
-git clone http://你的服务器:8080/仓库URL.git
-```
-
-## 示例
-
-```bash
-# GitHub文件下载
-wget "http://127.0.0.1:8080/https://github.com/golang/go/blob/master/README.md" -O README.md
-
-# GitLab文件下载
-curl -L "http://127.0.0.1:8080/https://gitlab.com/gitlab-org/gitlab/-/blob/master/README.md" -o README.md
-
-# Hugging Face模型文件
-wget "http://127.0.0.1:8080/https://huggingface.co/microsoft/DialoGPT-medium/resolve/main/config.json" -O config.json
-
-# Git仓库克隆
-git clone http://127.0.0.1:8080/https://github.com/golang/go.git
-```
-
-## 技术特性
-
-- **日志管理**: 自动轮转，单文件限制5MB
-- **服务管理**: systemd保活，开机自启
-- **安全配置**: 非特权用户运行，安全沙箱
-- **高可用**: 服务异常自动重启
-
-## 开源协议
-
-本项目采用 MIT 开源协议
