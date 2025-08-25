@@ -4,7 +4,7 @@
 # 支持 GitHub、GitLab、Hugging Face、SourceForge
 # 
 # 使用方法:
-# wget https://github.com/vansour/ghproxy/blob/main/install.sh -O ghproxy.sh && chmod +x ./ghproxy.sh && ./ghproxy.sh
+# wget https://raw.githubusercontent.com/vansour/ghproxy/main/install.sh -O ghproxy.sh && chmod +x ./ghproxy.sh && ./ghproxy.sh
 
 set -e
 
@@ -264,7 +264,7 @@ show_help() {
     echo "  help        - 显示帮助信息"
     echo ""
     echo "一键安装命令:"
-    echo "  wget https://github.com/vansour/ghproxy/blob/main/install.sh -O ghproxy.sh && chmod +x ./ghproxy.sh && ./ghproxy.sh"
+    echo "  wget https://raw.githubusercontent.com/vansour/ghproxy/main/install.sh -O ghproxy.sh && chmod +x ./ghproxy.sh && ./ghproxy.sh"
     echo ""
     echo "服务信息:"
     echo "  端口: 8080"
