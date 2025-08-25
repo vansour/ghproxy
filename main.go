@@ -12,6 +12,12 @@ import (
 	"time"
 )
 
+// 版本信息，通过构建时的ldflags设置
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+)
+
 func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	// 直接从RequestURI获取完整路径，这样可以避免Go的路径清理
 	requestURI := r.RequestURI
@@ -704,6 +710,14 @@ func main() {
 	// 设置日志轮转 - 限制为5MB
 	setupLogRotation()
 
+	// 打印版本信息
+	fmt.Printf("Git代码文件加速代理服务 v%s\n", Version)
+	fmt.Printf("构建时间: %s\n", BuildTime)
+	fmt.Printf("监听端口: :8080\n")
+	fmt.Printf("支持平台: GitHub, GitLab, Hugging Face, SourceForge\n")
+	fmt.Printf("Web界面: http://127.0.0.1:8080\n")
+	fmt.Printf("=" + strings.Repeat("=", 50) + "\n")
+
 	// 创建路由处理器
 	mux := http.NewServeMux()
 
@@ -719,9 +733,7 @@ func main() {
 	}
 
 	fmt.Printf("Git代码文件代理服务启动成功！\n")
-	fmt.Printf("监听端口: :8080\n")
-	fmt.Printf("支持平台: GitHub, GitLab, Hugging Face, SourceForge\n")
-	fmt.Printf("Web界面: http://127.0.0.1:8080\n")
+	log.Printf("服务版本: %s, 构建时间: %s", Version, BuildTime)
 	fmt.Printf("使用方法: http://127.0.0.1:8080/完整的文件URL\n")
 
 	log.Fatal(server.ListenAndServe())
