@@ -1,0 +1,36 @@
+# Go构建文件
+ghproxy
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# 测试文件
+*.test
+*.out
+
+# Go模块
+go.work
+
+# 日志文件
+*.log
+logs/
+
+# 临时文件
+*.tmp
+*.temp
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker相关
+.dockerignore
+
+# 系统文件
+.DS_Store
+Thumbs.db
