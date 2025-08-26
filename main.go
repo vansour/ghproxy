@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -41,9 +40,6 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Git代码文件加速代理服务</title>
-    <link rel="icon" type="image/x-icon" href="/favicon.ico">
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico">
     <style>
         * {
             margin: 0;
@@ -551,45 +547,6 @@ type GenerateLinksResponse struct {
 	Error       string `json:"error,omitempty"`
 }
 
-// Favicon处理函数
-func faviconHandler(w http.ResponseWriter, r *http.Request) {
-	// 16x16像素的ICO格式favicon，包含蓝色背景和白色字母"G"
-	faviconData := `AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAQAQAABMLAAATCwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wAqVar/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/////wD///8A////AP///wAqVqv/AAAA/wAAAP8qVqv/////AP///wD///8A////AP///wD///8A////AP///wAqVqv/AAAA/wAAAP8AAAD/AAAA/ypWq/////8A////AP///wD///8A////AP///wAqVqv/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/Klar/////wD///8A////AP///wAqVqv/AAAA/wAAAP8AAAD/Klar/ypWq/8AAAD/AAAA/ypWq/////8A////AP///wAqVqv/AAAA/wAAAP8AAAD/Klar/////wAqVqv/AAAA/wAAAP8qVqv/////AP///wAqVqv/AAAA/wAAAP8AAAD/Klar/////wD///8AKlar/wAAAP8AAAD/Klar/////wAqVqv/AAAA/wAAAP8AAAD/AAAA/ypWq/////8A////AP///wAqVqv/AAAA/wAAAP8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/Klar/ypWq/8qVqv/////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==`
-	
-	// 解码Base64数据
-	iconBytes, err := base64.StdEncoding.DecodeString(faviconData)
-	if err != nil {
-		http.Error(w, "无法生成favicon", http.StatusInternalServerError)
-		return
-	}
-	
-	// 设置正确的Content-Type和缓存
-	w.Header().Set("Content-Type", "image/x-icon")
-	w.Header().Set("Cache-Control", "public, max-age=86400") // 缓存1天
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(iconBytes)))
-	
-	// 写入favicon数据
-	w.Write(iconBytes)
-}
-
-// SVG Favicon处理函数
-func faviconSVGHandler(w http.ResponseWriter, r *http.Request) {
-	svgContent := `<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="16" cy="16" r="15" fill="#2563eb" stroke="#1d4ed8" stroke-width="2"/>
-  <text x="16" y="22" font-family="Arial, sans-serif" font-size="18" font-weight="bold" 
-        text-anchor="middle" fill="white">G</text>
-  <circle cx="24" cy="8" r="2" fill="#60a5fa"/>
-</svg>`
-	
-	// 设置正确的Content-Type和缓存
-	w.Header().Set("Content-Type", "image/svg+xml")
-	w.Header().Set("Cache-Control", "public, max-age=86400") // 缓存1天
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(svgContent)))
-	
-	// 写入SVG内容
-	w.Write([]byte(svgContent))
-}
-
 // API处理函数
 func generateLinksAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -763,10 +720,6 @@ func main() {
 
 	// 创建路由处理器
 	mux := http.NewServeMux()
-
-	// Favicon路由
-	mux.HandleFunc("/favicon.ico", faviconHandler)
-	mux.HandleFunc("/favicon.svg", faviconSVGHandler)
 
 	// API路由
 	mux.HandleFunc("/api/generate", generateLinksAPI)
