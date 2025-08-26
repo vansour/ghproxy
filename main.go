@@ -14,8 +14,8 @@ import (
 
 // 版本信息，通过构建时的ldflags设置
 var (
-	Version   = "dev"
-	BuildTime = "unknown"
+	Version = "2025.08.26.0551-test"
+	BuildTime = "2025-08-26 05:51:08 UTC"
 )
 
 func proxyHandler(w http.ResponseWriter, r *http.Request) {
@@ -28,6 +28,12 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	// 添加调试日志
 	log.Printf("收到请求: %s", requestURI)
 	log.Printf("处理路径: %s", requestPath)
+
+	// 处理URL解码问题
+	if decodedPath, err := url.QueryUnescape(requestPath); err == nil {
+		requestPath = decodedPath
+		log.Printf("解码后路径: %s", requestPath)
+	}
 
 	// 如果是根路径或空路径，返回使用说明
 	if requestPath == "" {
@@ -214,6 +220,44 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
             font-size: 0.9rem;
         }
         
+        .features {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+        
+        .features h2 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .feature-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        
+        .feature-item {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        
+        .feature-item h3 {
+            color: #495057;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+        
+        .feature-item p {
+            color: #6c757d;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        
         .toast {
             position: fixed;
             top: 20px;
@@ -245,7 +289,7 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
     <div class="container">
         <div class="header">
             <h1>🚀 Git代码文件加速代理</h1>
-            <p>支持 GitHub、GitLab、Hugging Face、SourceForge 四大平台文件加速访问</p>
+            <p>支持 GitHub、GitLab、Hugging Face 三大平台文件加速访问</p>
         </div>
         
         <div class="main-panel">
@@ -306,9 +350,23 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
                     <h3>Hugging Face</h3>
                     <p>支持模型和数据集文件</p>
                 </div>
-                <div class="platform-card">
-                    <h3>SourceForge</h3>
-                    <p>支持项目文件下载</p>
+            </div>
+        </div>
+        
+        <div class="features">
+            <h2>🚀 特色功能</h2>
+            <div class="feature-list">
+                <div class="feature-item">
+                    <h3>🎯 多平台支持</h3>
+                    <p>完美支持GitHub、GitLab、Hugging Face，自动转换URL格式</p>
+                </div>
+                <div class="feature-item">
+                    <h3>🛡️ 高可用性</h3>
+                    <p>智能重定向处理，自动重试机制，确保下载成功率</p>
+                </div>
+                <div class="feature-item">
+                    <h3>📊 实时监控</h3>
+                    <p>详细的访问日志，便于问题诊断和性能监控</p>
                 </div>
             </div>
         </div>
@@ -433,8 +491,7 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
             const examples = [
                 'https://github.com/vansour/bbr/blob/main/bbr.sh',
                 'https://gitlab.com/gitlab-org/gitlab/-/blob/master/README.md',
-                'https://huggingface.co/microsoft/DialoGPT-medium/resolve/main/README.md',
-                'https://sourceforge.net/projects/sevenzip/files/7-Zip/README.txt'
+                'https://huggingface.co/microsoft/DialoGPT-medium/resolve/main/README.md'
             ];
             
             // 随机显示一个示例
@@ -452,8 +509,24 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	// 处理Go路由器自动清理双斜杠的问题
 	if strings.HasPrefix(requestPath, "https:/") && !strings.HasPrefix(requestPath, "https://") {
 		requestPath = "https://" + strings.TrimPrefix(requestPath, "https:/")
+		log.Printf("修复https URL: %s", requestPath)
 	} else if strings.HasPrefix(requestPath, "http:/") && !strings.HasPrefix(requestPath, "http://") {
 		requestPath = "http://" + strings.TrimPrefix(requestPath, "http:/")
+		log.Printf("修复http URL: %s", requestPath)
+	}
+
+	// 额外处理：检查URL中是否有被错误清理的协议部分
+	if strings.Contains(requestPath, ":/") && !strings.Contains(requestPath, "://") {
+		// 查找协议部分并修复
+		parts := strings.Split(requestPath, ":/")
+		if len(parts) == 2 {
+			protocol := parts[0]
+			remainder := parts[1]
+			if protocol == "https" || protocol == "http" {
+				requestPath = protocol + "://" + remainder
+				log.Printf("修复协议分隔符: %s", requestPath)
+			}
+		}
 	}
 
 	if !strings.HasPrefix(requestPath, "http://") && !strings.HasPrefix(requestPath, "https://") {
@@ -473,15 +546,29 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 验证是否是支持的域名
 	if !isSupportedDomain(targetURL.Host) {
-		http.Error(w, "只支持GitHub、GitLab、Hugging Face和SourceForge相关域名", http.StatusForbidden)
+		http.Error(w, "只支持GitHub、GitLab、Hugging Face相关域名", http.StatusForbidden)
 		return
 	}
 
 	log.Printf("目标URL: %s", targetURL.String())
 
-	// 创建HTTP客户端，无超时限制
+	// 创建HTTP客户端，自定义重定向策略
 	client := &http.Client{
-		// 移除超时限制
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// 允许跟随重定向，但需要检查重定向目标域名
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+
+			// 检查重定向目标是否为支持的域名
+			if !isSupportedDomain(req.URL.Host) {
+				log.Printf("重定向到不支持的域名: %s", req.URL.Host)
+				return fmt.Errorf("redirect to unsupported domain: %s", req.URL.Host)
+			}
+
+			log.Printf("跟随重定向: %s -> %s", via[len(via)-1].URL.String(), req.URL.String())
+			return nil
+		},
 	} // 创建请求
 	req, err := http.NewRequest(r.Method, targetURL.String(), r.Body)
 	if err != nil {
@@ -498,8 +585,20 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 设置User-Agent
-	req.Header.Set("User-Agent", "Git-Proxy-Service/1.0")
+	// 设置User-Agent，模拟Windows用户以获取正确的下载文件
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+
+	// 添加更多浏览器头部来避免被检测为机器人
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	req.Header.Set("DNT", "1")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Upgrade-Insecure-Requests", "1")
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Site", "none")
+	req.Header.Set("Sec-Fetch-User", "?1")
 
 	// 发送请求
 	resp, err := client.Do(req)
@@ -714,22 +813,22 @@ func main() {
 	fmt.Printf("Git代码文件加速代理服务 v%s\n", Version)
 	fmt.Printf("构建时间: %s\n", BuildTime)
 	fmt.Printf("监听端口: :8080\n")
-	fmt.Printf("支持平台: GitHub, GitLab, Hugging Face, SourceForge\n")
+	fmt.Printf("支持平台: GitHub, GitLab, Hugging Face\n")
 	fmt.Printf("Web界面: http://127.0.0.1:8080\n")
 	fmt.Printf("=" + strings.Repeat("=", 50) + "\n")
 
-	// 创建路由处理器
-	mux := http.NewServeMux()
-
-	// API路由
-	mux.HandleFunc("/api/generate", generateLinksAPI)
-
-	// 默认代理路由
-	mux.HandleFunc("/", proxyHandler)
-
+	// 创建自定义的处理器来避免Go的路径清理问题
 	server := &http.Server{
-		Addr:    ":8080",
-		Handler: mux,
+		Addr: ":8080",
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// 特殊处理API路由
+			if strings.HasPrefix(r.URL.Path, "/api/generate") {
+				generateLinksAPI(w, r)
+				return
+			}
+			// 所有其他请求都走代理处理器
+			proxyHandler(w, r)
+		}),
 	}
 
 	fmt.Printf("Git代码文件代理服务启动成功！\n")
@@ -748,8 +847,6 @@ func convertURL(u *url.URL) *url.URL {
 		return convertGitLabURL(u)
 	case "huggingface.co":
 		return convertHuggingFaceURL(u)
-	case "sourceforge.net", "sf.net":
-		return convertSourceForgeURL(u)
 	}
 	return u
 }
@@ -808,45 +905,6 @@ func convertHuggingFaceURL(u *url.URL) *url.URL {
 	return u
 }
 
-// 转换SourceForge URL为下载格式
-func convertSourceForgeURL(u *url.URL) *url.URL {
-	if u.Host == "sourceforge.net" || u.Host == "sf.net" {
-		path := u.Path
-		// SourceForge文件链接格式处理
-		// 例: /projects/project/files/path/file.txt -> /projects/project/files/path/file.txt/download
-		if strings.HasPrefix(path, "/projects/") && strings.Contains(path, "/files/") {
-			// 如果已经是下载链接，保持不变
-			if strings.HasSuffix(path, "/download") {
-				return u
-			}
-			// 如果不是下载链接，添加/download
-			u.Path = path + "/download"
-		}
-		// 处理直接文件访问链接，转换为下载链接
-		// 例: /p/project/code/HEAD/tree/file.txt -> /projects/project/files/file.txt/download
-		if strings.HasPrefix(path, "/p/") && strings.Contains(path, "/code/") {
-			parts := strings.Split(strings.Trim(path, "/"), "/")
-			if len(parts) >= 5 && parts[2] == "code" {
-				// 提取项目名和文件路径
-				project := parts[1]
-				// 找到tree之后的文件路径
-				treeIndex := -1
-				for i, part := range parts {
-					if part == "tree" {
-						treeIndex = i
-						break
-					}
-				}
-				if treeIndex != -1 && treeIndex+1 < len(parts) {
-					filePath := strings.Join(parts[treeIndex+1:], "/")
-					u.Path = fmt.Sprintf("/projects/%s/files/%s/download", project, filePath)
-				}
-			}
-		}
-	}
-	return u
-}
-
 // 检查是否是支持的代码托管平台域名
 func isSupportedDomain(host string) bool {
 	allowedDomains := []string{
@@ -863,11 +921,10 @@ func isSupportedDomain(host string) bool {
 
 		// Hugging Face相关域名
 		"huggingface.co",
-		"hf.co", // Hugging Face短域名
-
-		// SourceForge相关域名
-		"sourceforge.net",
-		"sf.net", // SourceForge短域名
+		"hf.co",                   // Hugging Face短域名
+		"cdn-lfs.huggingface.co",  // Hugging Face LFS CDN
+		"cas-bridge.xethub.hf.co", // Hugging Face CDN桥接
+		"cdn-lfs.hf.co",           // Hugging Face LFS CDN短域名
 	}
 
 	for _, domain := range allowedDomains {
