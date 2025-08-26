@@ -14,7 +14,7 @@ import (
 
 // 版本信息，通过构建时的ldflags设置
 var (
-	Version = "2025.08.26.0551-test"
+	Version   = "2025.08.26.0551-test"
 	BuildTime = "2025-08-26 05:51:08 UTC"
 )
 
@@ -137,8 +137,41 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
         }
         
         .results {
-            display: none;
             margin-top: 30px;
+        }
+        
+        .result-tabs {
+            display: flex;
+            border-bottom: 2px solid #e9ecef;
+            margin-bottom: 20px;
+        }
+        
+        .tab-btn {
+            flex: 1;
+            padding: 12px 16px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #6c757d;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .tab-btn:hover {
+            color: #495057;
+            background: #f8f9fa;
+        }
+        
+        .tab-btn.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+            background: #f8f9fa;
         }
         
         .result-item {
@@ -146,7 +179,6 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
             border: 1px solid #e9ecef;
             border-radius: 10px;
             padding: 20px;
-            margin-bottom: 15px;
         }
         
         .result-item h3 {
@@ -159,11 +191,21 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
             background: #f1f3f4;
             border: 1px solid #dadce0;
             border-radius: 6px;
-            padding: 12px 80px 12px 12px;
+            padding: 12px;
             font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
             font-size: 14px;
             word-break: break-all;
             position: relative;
+            min-height: 20px;
+        }
+        
+        .result-code span {
+            display: block;
+            min-height: 20px;
+        }
+        
+        .result-code span:not(:empty) {
+            padding-right: 80px;
         }
         
         .copy-btn {
@@ -178,6 +220,13 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
             font-size: 12px;
             cursor: pointer;
             transition: background 0.3s ease;
+            opacity: 0;
+            visibility: hidden;
+        }
+        
+        .result-code span:not(:empty) + .copy-btn {
+            opacity: 1;
+            visibility: visible;
         }
         
         .copy-btn:hover {
@@ -296,40 +345,30 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
             <div class="input-section">
                 <label for="original-url">输入原始链接：</label>
                 <input type="text" id="original-url" class="url-input" 
-                       placeholder="例如：https://github.com/user/repo/blob/main/file.txt">
-                <button class="generate-btn" onclick="generateLinks()">生成加速链接</button>
+                       placeholder="例如：https://github.com/user/repo/blob/main/file.txt"
+                       oninput="generateLinksRealtime()">
             </div>
             
             <div id="results" class="results">
-                <div class="result-item">
-                    <h3>🌐 浏览器直接访问</h3>
-                    <div class="result-code">
-                        <span id="browser-link"></span>
-                        <button class="copy-btn" onclick="copyToClipboard('browser-link')">复制</button>
-                    </div>
+                <div class="result-tabs">
+                    <button class="tab-btn active" onclick="switchTab('browser')">
+                        <span>🌐</span> 浏览器访问
+                    </button>
+                    <button class="tab-btn" onclick="switchTab('wget')">
+                        <span>📥</span> wget 下载
+                    </button>
+                    <button class="tab-btn" onclick="switchTab('curl')">
+                        <span>📦</span> curl 下载
+                    </button>
+                    <button class="tab-btn" onclick="switchTab('git')">
+                        <span>🔀</span> git clone
+                    </button>
                 </div>
                 
                 <div class="result-item">
-                    <h3>📥 wget 下载</h3>
                     <div class="result-code">
-                        <span id="wget-cmd"></span>
-                        <button class="copy-btn" onclick="copyToClipboard('wget-cmd')">复制</button>
-                    </div>
-                </div>
-                
-                <div class="result-item">
-                    <h3>📦 curl 下载</h3>
-                    <div class="result-code">
-                        <span id="curl-cmd"></span>
-                        <button class="copy-btn" onclick="copyToClipboard('curl-cmd')">复制</button>
-                    </div>
-                </div>
-                
-                <div class="result-item">
-                    <h3>🔀 git clone</h3>
-                    <div class="result-code">
-                        <span id="git-cmd"></span>
-                        <button class="copy-btn" onclick="copyToClipboard('git-cmd')">复制</button>
+                        <span id="result-content"></span>
+                        <button class="copy-btn" onclick="copyResult()">复制</button>
                     </div>
                 </div>
             </div>
@@ -352,39 +391,119 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
                 </div>
             </div>
         </div>
-        
-        <div class="features">
-            <h2>🚀 特色功能</h2>
-            <div class="feature-list">
-                <div class="feature-item">
-                    <h3>🎯 多平台支持</h3>
-                    <p>完美支持GitHub、GitLab、Hugging Face，自动转换URL格式</p>
-                </div>
-                <div class="feature-item">
-                    <h3>🛡️ 高可用性</h3>
-                    <p>智能重定向处理，自动重试机制，确保下载成功率</p>
-                </div>
-                <div class="feature-item">
-                    <h3>📊 实时监控</h3>
-                    <p>详细的访问日志，便于问题诊断和性能监控</p>
-                </div>
-            </div>
-        </div>
     </div>
     
     <div id="toast" class="toast">复制成功！</div>
     
     <script>
-        function generateLinks() {
+        // 存储所有生成的链接
+        let generatedLinks = {
+            browser: '',
+            wget: '',
+            curl: '',
+            git: ''
+        };
+        
+        // 当前活跃的标签
+        let currentTab = 'browser';
+        
+        function switchTab(tabName) {
+            // 更新标签按钮状态
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.closest('.tab-btn').classList.add('active');
+            
+            // 更新当前标签
+            currentTab = tabName;
+            
+            // 更新显示内容
+            updateResultContent();
+        }
+        
+        function updateResultContent() {
+            const resultContent = document.getElementById('result-content');
+            resultContent.textContent = generatedLinks[currentTab];
+        }
+        
+        function generateLinksRealtime() {
             const originalUrl = document.getElementById('original-url').value.trim();
             
+            // 清空所有链接
+            generatedLinks = {
+                browser: '',
+                wget: '',
+                curl: '',
+                git: ''
+            };
+            
+            // 如果输入为空，清空显示
             if (!originalUrl) {
-                alert('请输入原始链接！');
+                updateResultContent();
                 return;
             }
             
+            // 检查URL格式
             if (!originalUrl.startsWith('http://') && !originalUrl.startsWith('https://')) {
-                alert('请输入完整的URL（包含http://或https://）！');
+                generatedLinks[currentTab] = '请输入完整的URL（包含http://或https://）';
+                updateResultContent();
+                return;
+            }
+            
+            // 检查是否是支持的域名
+            try {
+                const url = new URL(originalUrl);
+                const supportedDomains = [
+                    'github.com', 'gitlab.com', 'huggingface.co',
+                    'raw.githubusercontent.com', 'gist.githubusercontent.com',
+                    'hf.co', 'cdn-lfs.huggingface.co'
+                ];
+                
+                if (!supportedDomains.some(domain => url.hostname === domain || url.hostname.endsWith('.' + domain))) {
+                    generatedLinks[currentTab] = '只支持GitHub、GitLab、Hugging Face相关域名';
+                    updateResultContent();
+                    return;
+                }
+                
+                // 特殊处理Hugging Face - 仅支持文件下载
+                if (url.hostname === 'huggingface.co' || url.hostname === 'hf.co') {
+                    if (!url.pathname.includes('/resolve/') && !url.pathname.includes('/blob/')) {
+                        generatedLinks[currentTab] = 'Hugging Face 链接需要包含具体文件路径（/blob/ 或 /resolve/）';
+                        updateResultContent();
+                        return;
+                    }
+                }
+                
+                // 特殊处理GitHub - 仅支持文件下载
+                if (url.hostname === 'github.com') {
+                    const path = url.pathname;
+                    // 只允许文件路径和gist，不允许直接访问仓库根路径
+                    const isFilePath = path.includes('/blob/') || path.includes('/raw/') || path.includes('/tree/');
+                    // 允许gist
+                    const isGist = path.includes('/gist/');
+                    
+                    if (!isFilePath && !isGist) {
+                        generatedLinks[currentTab] = 'GitHub 链接仅支持文件下载路径（/blob/, /raw/, /tree/）或gist，git clone请使用git命令';
+                        updateResultContent();
+                        return;
+                    }
+                }
+                
+                // 特殊处理GitLab - 仅支持文件下载
+                if (url.hostname === 'gitlab.com') {
+                    const path = url.pathname;
+                    // 只允许文件路径，不允许直接访问仓库根路径
+                    const isFilePath = path.includes('/-/blob/') || path.includes('/-/raw/') || path.includes('/-/tree/');
+                    
+                    if (!isFilePath) {
+                        generatedLinks[currentTab] = 'GitLab 链接仅支持文件下载路径（/-/blob/, /-/raw/, /-/tree/），git clone请使用git命令';
+                        updateResultContent();
+                        return;
+                    }
+                }
+            } catch (e) {
+                generatedLinks[currentTab] = 'URL格式无效';
+                updateResultContent();
                 return;
             }
             
@@ -396,14 +515,10 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
             // 生成加速链接
             const acceleratedUrl = baseUrl + '/' + originalUrl;
             
-            // 更新各种格式的链接
-            document.getElementById('browser-link').textContent = acceleratedUrl;
-            
-            // 提取文件名
-            const fileName = originalUrl.split('/').pop() || 'downloaded_file';
-            
-            document.getElementById('wget-cmd').textContent = 'wget "' + acceleratedUrl + '" -O ' + fileName;
-            document.getElementById('curl-cmd').textContent = 'curl -L "' + acceleratedUrl + '" -o ' + fileName;
+            // 存储各种格式的链接
+            generatedLinks.browser = acceleratedUrl;
+            generatedLinks.wget = 'wget "' + acceleratedUrl + '"';
+            generatedLinks.curl = 'curl -L "' + acceleratedUrl + '"';
             
             // Git clone处理
             if (originalUrl.includes('github.com') || originalUrl.includes('gitlab.com')) {
@@ -417,7 +532,7 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
                     gitUrl.includes('/raw/') ||
                     gitUrl.includes('/-/raw/') ||
                     gitUrl.includes('/gist/')) {
-                    document.getElementById('git-cmd').textContent = '此链接不支持 git clone（archive/release/raw文件请使用浏览器或下载命令）';
+                    generatedLinks.git = '此链接不支持 git clone（archive/release/raw文件请使用浏览器或下载命令）';
                 } else {
                     // 处理GitHub/GitLab仓库链接
                     if (gitUrl.includes('/blob/') || gitUrl.includes('/tree/')) {
@@ -436,25 +551,29 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
                         }
                         
                         const acceleratedGitUrl = baseUrl + '/' + gitUrl;
-                        document.getElementById('git-cmd').textContent = 'git clone ' + acceleratedGitUrl;
+                        generatedLinks.git = 'git clone ' + acceleratedGitUrl;
                     } else {
-                        document.getElementById('git-cmd').textContent = '此链接不支持 git clone（URL格式无效）';
+                        generatedLinks.git = '此链接不支持 git clone（URL格式无效）';
                     }
                 }
             } else {
-                document.getElementById('git-cmd').textContent = '此链接不支持 git clone（仅支持 GitHub/GitLab 仓库）';
+                generatedLinks.git = '此链接不支持 git clone（仅支持 GitHub/GitLab 仓库）';
             }
             
-            // 显示结果
-            document.getElementById('results').style.display = 'block';
+            // 更新当前显示的内容
+            updateResultContent();
+        }
+        
+        function generateLinks() {
+            // 保持兼容性，直接调用实时生成函数
+            generateLinksRealtime();
             
             // 滚动到结果区域
             document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
         }
         
-        function copyToClipboard(elementId) {
-            const element = document.getElementById(elementId);
-            const text = element.textContent;
+        function copyResult() {
+            const text = generatedLinks[currentTab];
             
             navigator.clipboard.writeText(text).then(function() {
                 showToast();
@@ -477,13 +596,6 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
                 toast.style.display = 'none';
             }, 2000);
         }
-        
-        // 回车键触发生成
-        document.getElementById('original-url').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                generateLinks();
-            }
-        });
         
         // 页面加载时的示例
         window.addEventListener('load', function() {
@@ -548,6 +660,40 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	if !isSupportedDomain(targetURL.Host) {
 		http.Error(w, "只支持GitHub、GitLab、Hugging Face相关域名", http.StatusForbidden)
 		return
+	}
+
+	// 特殊验证Hugging Face文件下载
+	if targetURL.Host == "huggingface.co" {
+		if !strings.Contains(targetURL.Path, "/resolve/") && !strings.Contains(targetURL.Path, "/raw/") {
+			http.Error(w, "Hugging Face 链接需要包含具体文件路径（/resolve/ 或 /raw/）", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// 特殊验证GitHub - 仅支持文件下载，git clone应通过git命令使用
+	if targetURL.Host == "github.com" {
+		path := targetURL.Path
+		// 只允许文件路径和gist，不允许直接访问仓库根路径
+		isFilePath := strings.Contains(path, "/blob/") || strings.Contains(path, "/raw/") || strings.Contains(path, "/tree/")
+		// 检查是否是gist
+		isGist := strings.Contains(path, "/gist/")
+
+		if !isFilePath && !isGist {
+			http.Error(w, "GitHub 链接仅支持文件下载路径（/blob/, /raw/, /tree/）或gist，git clone请使用git命令", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// 特殊验证GitLab - 仅支持文件下载，git clone应通过git命令使用
+	if targetURL.Host == "gitlab.com" {
+		path := targetURL.Path
+		// 只允许文件路径，不允许直接访问仓库根路径
+		isFilePath := strings.Contains(path, "/-/blob/") || strings.Contains(path, "/-/raw/") || strings.Contains(path, "/-/tree/")
+
+		if !isFilePath {
+			http.Error(w, "GitLab 链接仅支持文件下载路径（/-/blob/, /-/raw/, /-/tree/），git clone请使用git命令", http.StatusBadRequest)
+			return
+		}
 	}
 
 	log.Printf("目标URL: %s", targetURL.String())
@@ -706,6 +852,62 @@ func generateLinksAPI(w http.ResponseWriter, r *http.Request) {
 	// 生成加速链接
 	acceleratedURL := baseURL + "/" + originalURL
 
+	// 特殊验证Hugging Face文件下载
+	if strings.Contains(originalURL, "huggingface.co") {
+		if !strings.Contains(originalURL, "/resolve/") && !strings.Contains(originalURL, "/blob/") {
+			response := GenerateLinksResponse{
+				Success: false,
+				Error:   "Hugging Face 链接需要包含具体文件路径（/blob/ 或 /resolve/）",
+			}
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+	}
+
+	// 特殊验证GitHub - 仅支持文件下载和git clone
+	if strings.Contains(originalURL, "github.com") {
+		if u, err := url.Parse(originalURL); err == nil {
+			path := u.Path
+			// 检查是否是仓库根路径（用于git clone）- 格式应为 /user/repo 或 /user/repo/
+			pathParts := strings.Split(strings.Trim(path, "/"), "/")
+			isRepoRoot := len(pathParts) == 2 && pathParts[0] != "" && pathParts[1] != "" && !strings.Contains(path, ".")
+			// 检查是否是文件路径
+			isFilePath := strings.Contains(path, "/blob/") || strings.Contains(path, "/raw/") || strings.Contains(path, "/tree/")
+			// 检查是否是gist
+			isGist := strings.Contains(path, "/gist/")
+
+			if !isRepoRoot && !isFilePath && !isGist {
+				response := GenerateLinksResponse{
+					Success: false,
+					Error:   "GitHub 链接仅支持仓库根路径（git clone）或文件路径（/blob/, /raw/, /tree/）",
+				}
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+		}
+	}
+
+	// 特殊验证GitLab - 仅支持文件下载和git clone
+	if strings.Contains(originalURL, "gitlab.com") {
+		if u, err := url.Parse(originalURL); err == nil {
+			path := u.Path
+			// 检查是否是仓库根路径（用于git clone）- 格式应为 /user/repo 或 /user/repo/
+			pathParts := strings.Split(strings.Trim(path, "/"), "/")
+			isRepoRoot := len(pathParts) == 2 && pathParts[0] != "" && pathParts[1] != "" && !strings.Contains(path, ".")
+			// 检查是否是文件路径
+			isFilePath := strings.Contains(path, "/-/blob/") || strings.Contains(path, "/-/raw/") || strings.Contains(path, "/-/tree/")
+
+			if !isRepoRoot && !isFilePath {
+				response := GenerateLinksResponse{
+					Success: false,
+					Error:   "GitLab 链接仅支持仓库根路径（git clone）或文件路径（/-/blob/, /-/raw/, /-/tree/）",
+				}
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+		}
+	}
+
 	// 提取文件名
 	fileName := "downloaded_file"
 	if lastSlash := strings.LastIndex(originalURL, "/"); lastSlash != -1 {
@@ -718,8 +920,8 @@ func generateLinksAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 生成各种命令
-	wgetCmd := fmt.Sprintf(`wget "%s" -O %s`, acceleratedURL, fileName)
-	curlCmd := fmt.Sprintf(`curl -L "%s" -o %s`, acceleratedURL, fileName)
+	wgetCmd := fmt.Sprintf(`wget "%s"`, acceleratedURL)
+	curlCmd := fmt.Sprintf(`curl -L "%s"`, acceleratedURL)
 
 	// Git clone处理
 	gitCmd := "此链接不支持 git clone（仅支持 GitHub/GitLab 仓库）"
@@ -854,14 +1056,15 @@ func convertURL(u *url.URL) *url.URL {
 // 转换GitHub URL为raw格式
 func convertGitHubURL(u *url.URL) *url.URL {
 	if u.Host == "github.com" {
-		// 将github.com的blob链接转换为raw.githubusercontent.com
 		path := u.Path
+		// 只转换blob链接为raw格式，保持其他路径不变
 		if strings.Contains(path, "/blob/") {
 			// 例: /user/repo/blob/branch/file -> /user/repo/branch/file
 			newPath := strings.Replace(path, "/blob/", "/", 1)
 			u.Host = "raw.githubusercontent.com"
 			u.Path = newPath
 		}
+		// 对于仓库根路径、tree路径等，保持原样以支持git clone
 	}
 	return u
 }
@@ -870,12 +1073,13 @@ func convertGitHubURL(u *url.URL) *url.URL {
 func convertGitLabURL(u *url.URL) *url.URL {
 	if u.Host == "gitlab.com" {
 		path := u.Path
-		// 将gitlab.com的blob链接转换为raw链接
+		// 只转换blob链接为raw链接，保持其他路径不变
 		if strings.Contains(path, "/-/blob/") {
 			// 例: /user/repo/-/blob/branch/file -> /user/repo/-/raw/branch/file
 			newPath := strings.Replace(path, "/-/blob/", "/-/raw/", 1)
 			u.Path = newPath
 		}
+		// 对于仓库根路径、tree路径等，保持原样以支持git clone
 	}
 	return u
 }
@@ -890,15 +1094,24 @@ func convertHuggingFaceURL(u *url.URL) *url.URL {
 			newPath := strings.Replace(path, "/blob/", "/resolve/", 1)
 			u.Path = newPath
 		}
-		// 如果路径不包含resolve，自动添加resolve
+		// 确保路径包含文件下载相关的路径
 		if !strings.Contains(path, "/resolve/") && !strings.Contains(path, "/raw/") {
-			// 尝试智能转换，假设格式为 /model/main/file
+			// 对于没有resolve的路径，检查是否为文件下载路径
 			parts := strings.Split(strings.Trim(path, "/"), "/")
 			if len(parts) >= 3 {
+				// 格式应为: /model/main/file 或 /datasets/dataset/main/file
 				// 在模型名和分支之间插入resolve
-				newParts := []string{parts[0], "resolve"}
-				newParts = append(newParts, parts[1:]...)
-				u.Path = "/" + strings.Join(newParts, "/")
+				if parts[0] == "datasets" && len(parts) >= 4 {
+					// 数据集格式: /datasets/dataset/resolve/main/file
+					newParts := []string{parts[0], parts[1], "resolve"}
+					newParts = append(newParts, parts[2:]...)
+					u.Path = "/" + strings.Join(newParts, "/")
+				} else {
+					// 模型格式: /model/resolve/main/file
+					newParts := []string{parts[0], "resolve"}
+					newParts = append(newParts, parts[1:]...)
+					u.Path = "/" + strings.Join(newParts, "/")
+				}
 			}
 		}
 	}
