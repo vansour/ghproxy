@@ -6,4 +6,19 @@ services:
       - "8080:8080"
     environment:
       - TZ=Asia/Shanghai
+    volumes:
+      # 配置文件挂载（可选）
+      - ./config.toml:/app/config.toml:ro
+      # 配置目录挂载（包含黑名单、白名单等）
+      - ./config:/app/config
+      # 日志目录挂载
+      - ./logs:/app/logs
+      # favicon文件挂载（可选）
+      - ./favicon.ico:/app/favicon.ico:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

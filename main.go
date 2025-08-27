@@ -1,51 +1,435 @@
+/*
+Git文件加速代理服务器
+===================
+
+这是一个用于加速访问GitHub、GitLab、Hugging Face等代码托管平台文件的代理服务器。
+主要功能：
+1. 代理并加速文件下载
+2. 支持多种平台的URL格式转换
+3. 提供Web界面生成加速链接
+4. 支持wget、curl、git clone等命令
+5. 可配置的文件大小限制、日志管理等
+
+支持的平台：
+- GitHub (github.com, raw.githubusercontent.com)
+- GitLab (gitlab.com)
+- Hugging Face (huggingface.co, hf.co)
+
+作者：vansour
+*/
+
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"log"
-	"net/http"
-	"net/url"
-	"os"
-	"strings"
-	"time"
+	"encoding/json" // JSON数据编码解码
+	"fmt"           // 格式化输入输出
+	"io"            // 输入输出原语
+	"log"           // 日志记录
+	"net/http"      // HTTP客户端和服务器
+	"net/url"       // URL解析
+	"os"            // 操作系统接口
+	"strconv"       // 字符串转换
+	"strings"       // 字符串操作
+	"time"          // 时间相关操作
 )
 
-// 版本信息，通过构建时的ldflags设置
-var (
-	Version   = "2025.08.26.0551-test"
-	BuildTime = "2025-08-26 05:51:08 UTC"
-)
+// ==================== 全局变量 ====================
 
+// ==================== 配置结构体 ====================
+
+// Config 主配置结构体，映射config.toml文件中的所有配置项
+// 使用toml标签来指定配置文件中对应的字段名
+type Config struct {
+	// 服务器相关配置
+	Server struct {
+		Host      string `toml:"host"`      // 监听地址（如0.0.0.0, 127.0.0.1）
+		Port      int    `toml:"port"`      // 监听端口号（如8080）
+		SizeLimit int    `toml:"sizeLimit"` // 文件大小限制（单位：MB）
+	} `toml:"server"`
+
+	// 日志相关配置
+	Log struct {
+		LogFilePath string `toml:"logFilePath"` // 日志文件存储路径
+		MaxLogSize  int    `toml:"maxLogSize"`  // 单个日志文件最大大小（单位：MB）
+		Level       string `toml:"level"`       // 日志级别（debug/info/warn/error/none）
+	} `toml:"log"`
+
+	// 黑名单配置
+	// 用于阻止特定域名或IP的访问
+	Blacklist struct {
+		Enabled       bool   `toml:"enabled"`       // 是否启用黑名单功能
+		BlacklistFile string `toml:"blacklistFile"` // 黑名单文件路径（JSON格式）
+	} `toml:"blacklist"`
+
+	// 白名单配置
+	// 用于仅允许特定域名或IP的访问（启用时只允许白名单内的访问）
+	Whitelist struct {
+		Enabled       bool   `toml:"enabled"`       // 是否启用白名单功能
+		WhitelistFile string `toml:"whitelistFile"` // 白名单文件路径（JSON格式）
+	} `toml:"whitelist"`
+
+	// 速率限制配置
+	// 用于防止服务器被过度使用或滥用
+	RateLimit struct {
+		Enabled       bool `toml:"enabled"`       // 是否启用速率限制
+		RatePerMinute int  `toml:"ratePerMinute"` // 每分钟允许的请求数
+		Burst         int  `toml:"burst"`         // 突发请求允许数量
+
+		// 带宽限制子配置
+		// 用于控制服务器和单个连接的带宽使用
+		BandwidthLimit struct {
+			Enabled     bool   `toml:"enabled"`     // 是否启用带宽限制
+			TotalLimit  string `toml:"totalLimit"`  // 服务器总带宽限制（如"100mbps"）
+			TotalBurst  string `toml:"totalBurst"`  // 服务器总带宽突发限制
+			SingleLimit string `toml:"singleLimit"` // 单个连接带宽限制
+			SingleBurst string `toml:"singleBurst"` // 单个连接带宽突发限制
+		} `toml:"bandwidthLimit"`
+	} `toml:"rateLimit"`
+}
+
+// ==================== 全局配置变量 ====================
+
+// config 全局配置变量，存储从配置文件加载的所有配置信息
+// 在程序启动时通过loadConfig函数初始化
+var config Config
+
+// ==================== 配置管理函数 ====================
+
+// loadConfig 加载配置文件
+// 参数：
+//
+//	configPath: 配置文件路径（通常是config.toml）
+//
+// 返回值：
+//
+//	error: 加载失败时返回错误信息，成功时返回nil
+//
+// 功能说明：
+// 1. 检查配置文件是否存在
+// 2. 如果不存在，使用默认配置
+// 3. 如果存在，解析TOML格式的配置文件
+// 4. 将配置信息加载到全局config变量中
+func loadConfig(configPath string) error {
+	// 暂时使用默认配置，后续可以添加toml支持
+	// TODO: 添加TOML配置文件解析功能
+	log.Printf("使用默认配置")
+	setDefaultConfig()
+	return nil
+}
+
+// setDefaultConfig 设置默认配置
+// 当配置文件不存在或解析失败时使用
+// 所有配置项都使用安全的默认值
+func setDefaultConfig() {
+	// 服务器配置默认值
+	config.Server.Host = "0.0.0.0" // 监听所有网络接口
+	config.Server.Port = 8080      // 默认端口8080
+	config.Server.SizeLimit = 2048 // 默认文件大小限制2GB
+
+	// 日志配置默认值
+	config.Log.LogFilePath = "./logs/ghproxy.log" // 相对于程序目录的日志路径
+	config.Log.MaxLogSize = 5                     // 默认单个日志文件最大5MB
+	config.Log.Level = "info"                     // 默认日志级别为info
+
+	// 功能开关默认值（默认都关闭，确保安全）
+	config.Blacklist.Enabled = false // 默认不启用黑名单
+	config.Whitelist.Enabled = false // 默认不启用白名单
+	config.RateLimit.Enabled = false // 默认不启用速率限制
+}
+
+// ==================== 配置文件生成函数 ====================
+
+// generateConfigFiles 生成配置相关的示例文件
+// 根据config.toml中的配置，自动创建相关目录和示例文件
+func generateConfigFiles() error {
+	log.Printf("开始生成配置相关文件...")
+
+	// 创建日志目录
+	if err := createLogDirectory(); err != nil {
+		return fmt.Errorf("创建日志目录失败: %v", err)
+	}
+
+	// 创建配置目录
+	if err := createConfigDirectory(); err != nil {
+		return fmt.Errorf("创建配置目录失败: %v", err)
+	}
+
+	// 生成黑名单示例文件
+	if err := generateBlacklistFile(); err != nil {
+		return fmt.Errorf("生成黑名单文件失败: %v", err)
+	}
+
+	// 生成白名单示例文件
+	if err := generateWhitelistFile(); err != nil {
+		return fmt.Errorf("生成白名单文件失败: %v", err)
+	}
+
+	// 生成完整的config.toml示例文件
+	if err := generateConfigTomlExample(); err != nil {
+		return fmt.Errorf("生成config.toml示例失败: %v", err)
+	}
+
+	log.Printf("配置文件生成完成")
+	return nil
+}
+
+// createLogDirectory 创建日志目录
+func createLogDirectory() error {
+	logDir := "./logs" // 默认在当前目录下创建logs文件夹
+	if config.Log.LogFilePath != "" {
+		// 从日志文件路径中提取目录
+		logDir = config.Log.LogFilePath[:strings.LastIndex(config.Log.LogFilePath, "/")]
+	}
+
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return err
+	}
+	log.Printf("日志目录已创建: %s", logDir)
+	return nil
+}
+
+// createConfigDirectory 创建配置目录
+func createConfigDirectory() error {
+	configDir := "./config" // 在当前目录下创建config文件夹
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return err
+	}
+	log.Printf("配置目录已创建: %s", configDir)
+	return nil
+}
+
+// generateBlacklistFile 生成黑名单示例文件
+func generateBlacklistFile() error {
+	blacklistPath := config.Blacklist.BlacklistFile
+	if blacklistPath == "" {
+		blacklistPath = "./config/blacklist.json" // 默认在当前目录下的config文件夹
+	}
+
+	// 如果文件已存在，不覆盖
+	if _, err := os.Stat(blacklistPath); err == nil {
+		log.Printf("黑名单文件已存在，跳过生成: %s", blacklistPath)
+		return nil
+	}
+
+	// 黑名单示例数据
+	blacklistExample := map[string]interface{}{
+		"domains": []string{
+			"malicious-example.com",
+			"spam-site.net",
+		},
+		"ips": []string{
+			"192.168.1.100",
+			"10.0.0.50",
+		},
+		"paths": []string{
+			"/malicious-path/*",
+			"*/dangerous-file.exe",
+		},
+		"description": "黑名单配置文件 - 在此列出需要阻止访问的域名、IP和路径模式",
+		"usage":       "启用黑名单功能需要在config.toml中设置 blacklist.enabled = true",
+	}
+
+	return writeJSONFile(blacklistPath, blacklistExample)
+}
+
+// generateWhitelistFile 生成白名单示例文件
+func generateWhitelistFile() error {
+	whitelistPath := config.Whitelist.WhitelistFile
+	if whitelistPath == "" {
+		whitelistPath = "./config/whitelist.json" // 默认在当前目录下的config文件夹
+	}
+
+	// 如果文件已存在，不覆盖
+	if _, err := os.Stat(whitelistPath); err == nil {
+		log.Printf("白名单文件已存在，跳过生成: %s", whitelistPath)
+		return nil
+	}
+
+	// 白名单示例数据
+	whitelistExample := map[string]interface{}{
+		"domains": []string{
+			"github.com",
+			"gitlab.com",
+			"huggingface.co",
+			"raw.githubusercontent.com",
+			"gist.githubusercontent.com",
+			"hf.co",
+			"cdn-lfs.huggingface.co",
+		},
+		"ips": []string{
+			"140.82.112.0/20",
+			"140.82.114.0/20",
+		},
+		"paths": []string{
+			"*/blob/*",
+			"*/raw/*",
+			"*/resolve/*",
+			"*/archive/*",
+		},
+		"description": "白名单配置文件 - 只允许访问此列表中的域名、IP和路径模式",
+		"usage":       "启用白名单功能需要在config.toml中设置 whitelist.enabled = true",
+		"note":        "启用白名单后，只有在此列表中的域名才能被代理访问",
+	}
+
+	return writeJSONFile(whitelistPath, whitelistExample)
+}
+
+// generateConfigTomlExample 生成完整的config.toml示例文件
+func generateConfigTomlExample() error {
+	examplePath := "config.toml.example"
+
+	// 如果文件已存在，不覆盖
+	if _, err := os.Stat(examplePath); err == nil {
+		log.Printf("配置示例文件已存在，跳过生成: %s", examplePath)
+		return nil
+	}
+
+	configExample := `# Git文件加速代理配置文件
+# 详细说明：https://github.com/vansour/ghproxy
+
+# ==================== 服务器配置 ====================
+[server]
+host = "0.0.0.0"       # 监听地址，0.0.0.0表示监听所有网络接口
+port = 8080            # 监听端口
+sizeLimit = 2048       # 文件大小限制，单位MB，超过此大小的文件将被拒绝
+
+# ==================== 日志配置 ====================
+[log]
+logFilePath = "./logs/ghproxy.log"    # 日志文件路径（相对于程序目录）
+maxLogSize = 5                        # 单个日志文件最大大小，单位MB
+level = "info"                        # 日志级别：debug, info, warn, error, none
+
+# ==================== 黑名单配置 ====================
+[blacklist]
+enabled = false                              # 是否启用黑名单功能
+blacklistFile = "./config/blacklist.json"   # 黑名单文件路径（相对于程序目录）
+
+# ==================== 白名单配置 ====================
+[whitelist]
+enabled = false                              # 是否启用白名单功能
+whitelistFile = "./config/whitelist.json"   # 白名单文件路径（相对于程序目录）
+
+# ==================== 速率限制配置 ====================
+[rateLimit]
+enabled = false       # 是否启用速率限制
+ratePerMinute = 180   # 每分钟允许的请求数
+burst = 5             # 突发请求数量
+
+# 带宽限制配置（高级功能）
+[rateLimit.bandwidthLimit]
+enabled = false           # 是否启用带宽限制
+totalLimit = "100mbps"    # 服务器总带宽限制
+totalBurst = "100mbps"    # 服务器总带宽突发限制
+singleLimit = "10mbps"    # 单个连接带宽限制
+singleBurst = "10mbps"    # 单个连接带宽突发限制
+
+# ==================== 使用说明 ====================
+# 1. 修改配置后需要重启服务才能生效
+# 2. 日志文件会自动轮转，避免文件过大
+# 3. 黑名单和白名单不能同时启用
+# 4. 速率限制可以有效防止滥用
+# 5. 带宽限制需要额外的依赖包支持
+# 6. 所有路径都是相对于程序可执行文件的位置
+`
+
+	file, err := os.Create(examplePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = file.WriteString(configExample)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("配置示例文件已创建: %s", examplePath)
+	return nil
+}
+
+// writeJSONFile 写入JSON文件的辅助函数
+func writeJSONFile(filePath string, data interface{}) error {
+	file, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ") // 设置缩进，使JSON格式更易读
+	if err := encoder.Encode(data); err != nil {
+		return err
+	}
+
+	log.Printf("JSON文件已创建: %s", filePath)
+	return nil
+}
+
+// ==================== 核心处理函数 ====================
+
+// proxyHandler 核心代理处理函数
+// 这是整个代理服务器的核心，处理所有的HTTP请求
+//
+// 参数：
+//
+//	w: HTTP响应写入器，用于向客户端发送响应
+//	r: HTTP请求对象，包含客户端发送的所有请求信息
+//
+// 功能说明：
+// 1. 处理特殊路径（如favicon.ico）
+// 2. 解析和验证目标URL
+// 3. 转换不同平台的URL格式
+// 4. 代理请求到目标服务器
+// 5. 检查文件大小限制
+// 6. 返回响应给客户端
 func proxyHandler(w http.ResponseWriter, r *http.Request) {
+	// 直接把 /favicon.ico 交给文件系统
+	// 这样可以让浏览器正常显示网站图标
+	if r.URL.Path == "/favicon.ico" {
+		http.ServeFile(w, r, "favicon.ico")
+		return
+	}
+
+	// ========== 第一步：获取和处理请求路径 ==========
+
 	// 直接从RequestURI获取完整路径，这样可以避免Go的路径清理
+	// RequestURI包含原始的请求路径，不会被Go的HTTP库自动"清理"
+	// 这对于代理服务器来说很重要，因为我们需要保持URL的原始格式
 	requestURI := r.RequestURI
 
-	// 去掉开头的 "/"
+	// 去掉开头的 "/"，因为我们要把剩余部分作为目标URL
+	// 例如："/https://github.com/user/repo" -> "https://github.com/user/repo"
 	requestPath := strings.TrimPrefix(requestURI, "/")
 
-	// 添加调试日志
+	// 添加调试日志，记录请求信息便于调试和监控
 	log.Printf("收到请求: %s", requestURI)
 	log.Printf("处理路径: %s", requestPath)
 
 	// 处理URL解码问题
+	// 浏览器可能会对URL进行编码，我们需要将其解码回原始格式
+	// 例如：%3A -> :, %2F -> /
 	if decodedPath, err := url.QueryUnescape(requestPath); err == nil {
 		requestPath = decodedPath
 		log.Printf("解码后路径: %s", requestPath)
 	}
 
-	// 如果是根路径或空路径，返回使用说明
+	// ========== 第二步：处理根路径请求（显示Web界面） ==========
+
+	// 如果是根路径或空路径，返回使用说明页面
+	// 这个页面提供了一个友好的Web界面，用户可以输入URL并生成加速链接
 	if requestPath == "" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
+		// 下面是完整的HTML页面，包含样式和JavaScript
 		fmt.Fprintf(w, `
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Git代码文件加速代理服务</title>
+    <title>Git文件加速代理</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         * {
             margin: 0;
@@ -319,6 +703,62 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
             z-index: 1000;
         }
         
+        /* ========== Footer 样式 ========== */
+        .footer {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 30px;
+            margin-top: 30px;
+            text-align: center;
+            border-top: 2px solid #e9ecef;
+        }
+        
+        .footer-content {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+        
+        .footer-links {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+        
+        .footer-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            color: #667eea;
+            font-weight: 500;
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+        }
+        
+        .footer-link:hover {
+            color: #5a6fd8;
+            background: #f8f9fa;
+            border-color: #e9ecef;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+        }
+        
+        .footer-link i {
+            font-size: 18px;
+        }
+        
+        .copyright {
+            color: #6c757d;
+            font-size: 14px;
+            margin: 0;
+        }
+        
         @media (max-width: 768px) {
             .container {
                 padding: 15px;
@@ -331,13 +771,23 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
             .header h1 {
                 font-size: 2rem;
             }
+            
+            .footer-content {
+                flex-direction: column;
+                gap: 20px;
+            }
+            
+            .footer-links {
+                flex-direction: column;
+                gap: 15px;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 Git代码文件加速代理</h1>
+            <h1>🚀 Git文件加速代理</h1>
             <p>支持 GitHub、GitLab、Hugging Face 三大平台文件加速访问</p>
         </div>
         
@@ -388,6 +838,23 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
                 <div class="platform-card">
                     <h3>Hugging Face</h3>
                     <p>支持模型和数据集文件</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer 版权信息和链接 -->
+        <div class="footer">
+            <div class="footer-content">
+                <p class="copyright">© 2024-2025 Git文件加速代理. All rights reserved.</p>
+                <div class="footer-links">
+                    <a href="https://github.com/vansour/ghproxy" target="_blank" class="footer-link">
+                        <i class="fab fa-github"></i>
+                        GitHub 仓库
+                    </a>
+                    <a href="https://hub.docker.com/r/vansour/ghproxy" target="_blank" class="footer-link">
+                        <i class="fab fa-docker"></i>
+                        Docker 镜像
+                    </a>
                 </div>
             </div>
         </div>
@@ -617,8 +1084,11 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ========== 第三步：URL格式验证和修复 ==========
+
 	// 检查是否是有效的URL
 	// 处理Go路由器自动清理双斜杠的问题
+	// Go的HTTP路由器可能会将"https://"变成"https:/"，我们需要修复这个问题
 	if strings.HasPrefix(requestPath, "https:/") && !strings.HasPrefix(requestPath, "https://") {
 		requestPath = "https://" + strings.TrimPrefix(requestPath, "https:/")
 		log.Printf("修复https URL: %s", requestPath)
@@ -628,12 +1098,14 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 额外处理：检查URL中是否有被错误清理的协议部分
+	// 有时可能出现"https:/domain.com"这样的格式，需要修复为"https://domain.com"
 	if strings.Contains(requestPath, ":/") && !strings.Contains(requestPath, "://") {
 		// 查找协议部分并修复
 		parts := strings.Split(requestPath, ":/")
 		if len(parts) == 2 {
 			protocol := parts[0]
 			remainder := parts[1]
+			// 只处理标准的HTTP/HTTPS协议
 			if protocol == "https" || protocol == "http" {
 				requestPath = protocol + "://" + remainder
 				log.Printf("修复协议分隔符: %s", requestPath)
@@ -641,12 +1113,17 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 最终验证：确保URL格式正确
+	// 如果还是没有正确的协议前缀，返回错误
 	if !strings.HasPrefix(requestPath, "http://") && !strings.HasPrefix(requestPath, "https://") {
 		http.Error(w, "无效的URL格式，请使用完整的URL", http.StatusBadRequest)
 		return
 	}
 
-	// 解析目标URL
+	// ========== 第四步：解析和转换目标URL ==========
+
+	// 解析目标URL，将字符串转换为url.URL结构体
+	// 这样可以方便地访问URL的各个部分（协议、域名、路径等）
 	targetURL, err := url.Parse(requestPath)
 	if err != nil {
 		http.Error(w, "URL解析失败: "+err.Error(), http.StatusBadRequest)
@@ -654,9 +1131,14 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 处理URL转换（GitHub、GitLab、Hugging Face）
+	// 不同平台有不同的URL格式，需要转换为可以直接下载的raw格式
+	// 例如：GitHub的blob链接转换为raw.githubusercontent.com链接
 	targetURL = convertURL(targetURL)
 
+	// ========== 第五步：安全验证 ==========
+
 	// 验证是否是支持的域名
+	// 只允许代理已知的安全域名，防止被滥用为通用代理
 	if !isSupportedDomain(targetURL.Host) {
 		http.Error(w, "只支持GitHub、GitLab、Hugging Face相关域名", http.StatusForbidden)
 		return
@@ -684,10 +1166,38 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// ========== 第六步：平台特定验证 ==========
+
+	// 特殊验证Hugging Face文件下载
+	// Hugging Face有特定的URL格式要求，确保是文件下载而不是页面浏览
+	if targetURL.Host == "huggingface.co" {
+		if !strings.Contains(targetURL.Path, "/resolve/") && !strings.Contains(targetURL.Path, "/raw/") {
+			http.Error(w, "Hugging Face 链接需要包含具体文件路径（/resolve/ 或 /raw/）", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// 特殊验证GitHub - 仅支持文件下载，git clone应通过git命令使用
+	// 防止用户通过浏览器代理访问整个仓库，只允许具体文件
+	if targetURL.Host == "github.com" {
+		path := targetURL.Path
+		// 只允许文件路径和gist，不允许直接访问仓库根路径
+		isFilePath := strings.Contains(path, "/blob/") || strings.Contains(path, "/raw/") || strings.Contains(path, "/tree/")
+		// 检查是否是gist（GitHub代码片段）
+		isGist := strings.Contains(path, "/gist/")
+
+		if !isFilePath && !isGist {
+			http.Error(w, "GitHub 链接仅支持文件下载路径（/blob/, /raw/, /tree/）或gist，git clone请使用git命令", http.StatusBadRequest)
+			return
+		}
+	}
+
 	// 特殊验证GitLab - 仅支持文件下载，git clone应通过git命令使用
+	// 与GitHub类似，只允许文件下载，不允许仓库浏览
 	if targetURL.Host == "gitlab.com" {
 		path := targetURL.Path
 		// 只允许文件路径，不允许直接访问仓库根路径
+		// GitLab的URL格式：/-/blob/, /-/raw/, /-/tree/
 		isFilePath := strings.Contains(path, "/-/blob/") || strings.Contains(path, "/-/raw/") || strings.Contains(path, "/-/tree/")
 
 		if !isFilePath {
@@ -696,34 +1206,50 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 记录最终的目标URL
 	log.Printf("目标URL: %s", targetURL.String())
 
+	// ========== 第七步：创建HTTP客户端和请求 ==========
+
 	// 创建HTTP客户端，自定义重定向策略
+	// 这里配置了安全的重定向处理，防止被重定向到不安全的域名
 	client := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			// 允许跟随重定向，但需要检查重定向目标域名
+			// 防止无限重定向攻击
 			if len(via) >= 10 {
 				return fmt.Errorf("too many redirects")
 			}
 
 			// 检查重定向目标是否为支持的域名
+			// 这是一个重要的安全措施，防止通过重定向访问内网或其他不安全的地址
 			if !isSupportedDomain(req.URL.Host) {
 				log.Printf("重定向到不支持的域名: %s", req.URL.Host)
 				return fmt.Errorf("redirect to unsupported domain: %s", req.URL.Host)
 			}
 
+			// 记录重定向过程便于调试
 			log.Printf("跟随重定向: %s -> %s", via[len(via)-1].URL.String(), req.URL.String())
 			return nil
 		},
-	} // 创建请求
+	}
+
+	// 创建HTTP请求
+	// 复制原始请求的方法（GET/POST等）和请求体
 	req, err := http.NewRequest(r.Method, targetURL.String(), r.Body)
 	if err != nil {
 		http.Error(w, "创建请求失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// 复制原始请求的头部，但排除一些不需要的
+	// ========== 第八步：设置请求头 ==========
+
+	// 复制原始请求的头部，但排除一些代理相关的头部
+	// 这些头部应该由代理服务器重新生成，而不是直接转发
 	for key, values := range r.Header {
+		// 排除这些头部：
+		// - Host: 应该是目标服务器的域名
+		// - X-Forwarded-For: 代理链信息，由代理服务器添加
+		// - X-Real-Ip: 真实IP信息，由代理服务器添加
 		if key != "Host" && key != "X-Forwarded-For" && key != "X-Real-Ip" {
 			for _, value := range values {
 				req.Header.Add(key, value)
@@ -732,78 +1258,134 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 设置User-Agent，模拟Windows用户以获取正确的下载文件
+	// 某些网站可能会根据User-Agent返回不同的内容或限制访问
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 
 	// 添加更多浏览器头部来避免被检测为机器人
+	// 这些头部让请求看起来更像是来自真实的浏览器
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
-	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
-	req.Header.Set("DNT", "1")
-	req.Header.Set("Connection", "keep-alive")
-	req.Header.Set("Upgrade-Insecure-Requests", "1")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")    // 接受的语言
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br") // 接受的编码格式
+	req.Header.Set("DNT", "1")                             // Do Not Track请求
+	req.Header.Set("Connection", "keep-alive")             // 保持连接
+	req.Header.Set("Upgrade-Insecure-Requests", "1")       // 升级不安全请求
+	// 现代浏览器的安全相关头部
 	req.Header.Set("Sec-Fetch-Dest", "document")
 	req.Header.Set("Sec-Fetch-Mode", "navigate")
 	req.Header.Set("Sec-Fetch-Site", "none")
 	req.Header.Set("Sec-Fetch-User", "?1")
 
-	// 发送请求
+	// ========== 第九步：发送请求并获取响应 ==========
+
+	// 发送HTTP请求到目标服务器
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, "请求失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // 确保响应体被正确关闭
 
-	// 复制响应头
+	// ========== 第十步：处理响应 ==========
+
+	// 复制响应头到客户端
+	// 将目标服务器的响应头转发给客户端，保持原始响应的完整性
 	for key, values := range resp.Header {
 		for _, value := range values {
 			w.Header().Add(key, value)
 		}
 	}
 
-	// 设置状态码
+	// 检查文件大小限制
+	// 根据配置文件中的sizeLimit设置，拒绝过大的文件下载
+	// 这可以防止服务器资源被耗尽，也可以避免用户下载超大文件
+	if contentLength := resp.Header.Get("Content-Length"); contentLength != "" {
+		if size, err := strconv.ParseInt(contentLength, 10, 64); err == nil {
+			// 将配置中的MB转换为字节进行比较
+			maxSize := int64(config.Server.SizeLimit * 1024 * 1024)
+			if size > maxSize {
+				// 如果文件大小超过限制，返回413错误（请求实体过大）
+				http.Error(w, fmt.Sprintf("文件大小 %d MB 超过限制 %d MB", size/(1024*1024), config.Server.SizeLimit), http.StatusRequestEntityTooLarge)
+				return
+			}
+			// 记录文件大小信息
+			log.Printf("文件大小: %d MB", size/(1024*1024))
+		}
+	}
+
+	// 设置HTTP状态码
+	// 将目标服务器的状态码转发给客户端
 	w.WriteHeader(resp.StatusCode)
 
-	// 复制响应体
+	// ========== 第十一步：传输响应体 ==========
+
+	// 复制响应体数据
+	// 这是整个代理过程的核心：将目标服务器的响应数据流式传输给客户端
+	// 使用io.Copy可以高效地处理大文件，不会将整个文件加载到内存中
 	_, err = io.Copy(w, resp.Body)
 	if err != nil {
+		// 记录传输错误，可能是网络中断或客户端断开连接
 		log.Printf("复制响应体失败: %v", err)
 	}
 
-	// 记录访问日志
+	// ========== 第十二步：记录访问日志 ==========
+
+	// 记录完整的访问日志，包含客户端IP、原始请求、目标URL和响应状态
+	// 这对于监控、调试和分析服务使用情况非常重要
 	log.Printf("[%s] %s -> %s (Status: %d)",
-		r.RemoteAddr,
-		requestURI,
-		targetURL.String(),
-		resp.StatusCode)
+		r.RemoteAddr,       // 客户端IP地址
+		requestURI,         // 原始请求URI
+		targetURL.String(), // 实际访问的目标URL
+		resp.StatusCode)    // HTTP响应状态码
 }
 
-// API结构体
+// ==================== API相关结构体 ====================
+
+// GenerateLinksRequest API请求结构体
+// 用于接收客户端发送的生成加速链接请求
 type GenerateLinksRequest struct {
-	OriginalURL string `json:"original_url"`
+	OriginalURL string `json:"original_url"` // 原始URL（GitHub、GitLab、Hugging Face等）
 }
 
+// GenerateLinksResponse API响应结构体
+// 用于返回生成的各种格式的加速链接给客户端
 type GenerateLinksResponse struct {
-	Success     bool   `json:"success"`
-	BrowserLink string `json:"browser_link"`
-	WgetCommand string `json:"wget_command"`
-	CurlCommand string `json:"curl_command"`
-	GitCommand  string `json:"git_command"`
-	Error       string `json:"error,omitempty"`
+	Success     bool   `json:"success"`         // 请求是否成功
+	BrowserLink string `json:"browser_link"`    // 浏览器访问链接
+	WgetCommand string `json:"wget_command"`    // wget下载命令
+	CurlCommand string `json:"curl_command"`    // curl下载命令
+	GitCommand  string `json:"git_command"`     // git clone命令
+	Error       string `json:"error,omitempty"` // 错误信息（仅在失败时返回）
 }
 
-// API处理函数
+// ==================== API处理函数 ====================
+
+// generateLinksAPI 生成加速链接的API处理函数
+// 路径：/api/generate
+// 方法：POST
+//
+// 功能说明：
+// 1. 接收包含原始URL的JSON请求
+// 2. 验证URL格式和平台支持
+// 3. 生成各种格式的加速链接（浏览器、wget、curl、git）
+// 4. 返回JSON格式的响应
+//
+// 这个API主要供Web界面的JavaScript调用，实现实时链接生成功能
 func generateLinksAPI(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+	// 设置响应头
+	w.Header().Set("Content-Type", "application/json") // 返回JSON格式
+	// CORS设置，允许跨域访问（主要是为了支持前端JavaScript调用）
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
+	// 处理预检请求（CORS）
+	// 浏览器在发送跨域POST请求前会先发送OPTIONS请求
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
+	// 只接受POST请求
 	if r.Method != "POST" {
 		response := GenerateLinksResponse{
 			Success: false,
@@ -972,75 +1554,177 @@ func generateLinksAPI(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// 设置日志轮转功能
+// ==================== 日志管理函数 ====================
+
+// setupLogRotation 设置日志轮转功能
+//
+// 功能说明：
+// 1. 根据配置文件设置日志文件路径和大小限制
+// 2. 自动创建日志目录（如果不存在）
+// 3. 检查当前日志文件大小，超过限制时自动备份
+// 4. 设置日志同时输出到文件和控制台
+// 5. 通过时间戳命名备份文件，便于管理
+//
+// 日志轮转策略：
+// - 当日志文件超过配置的最大大小时，自动重命名为 "原文件名.时间戳"
+// - 创建新的日志文件继续记录
+// - 这样可以防止单个日志文件过大，便于日志分析和管理
 func setupLogRotation() {
-	const maxLogSize = 5 * 1024 * 1024 // 5MB
+	// 将配置中的MB转换为字节数
+	maxLogSize := int64(config.Log.MaxLogSize * 1024 * 1024)
 
-	// 根据环境选择日志路径
-	var logPath string
-	if _, err := os.Stat("/app/logs"); err == nil {
-		// Docker环境
-		logPath = "/app/logs/server.log"
-		os.MkdirAll("/app/logs", 0755)
-	} else {
-		// 系统环境
-		logPath = "/var/log/ghproxy/server.log"
-		os.MkdirAll("/var/log/ghproxy", 0755)
+	// 使用配置中的日志路径
+	logPath := config.Log.LogFilePath
+
+	// 确保日志目录存在
+	// 从完整路径中提取目录部分
+	logDir := strings.TrimSuffix(logPath, "/ghproxy.log")
+	if logDir == "" {
+		// 如果提取失败，使用默认目录
+		logDir = "/data/ghproxy/log"
 	}
+	// 创建目录，权限755（所有者可读写执行，组和其他用户可读执行）
+	os.MkdirAll(logDir, 0755)
 
-	// 检查日志文件大小
+	// 检查日志文件大小，实现日志轮转
 	if info, err := os.Stat(logPath); err == nil {
 		if info.Size() > maxLogSize {
-			// 备份当前日志
-			os.Rename(logPath, fmt.Sprintf("%s.%d", logPath, time.Now().Unix()))
+			// 备份当前日志文件
+			// 使用Unix时间戳作为后缀，确保文件名唯一
+			backupPath := fmt.Sprintf("%s.%d", logPath, time.Now().Unix())
+			os.Rename(logPath, backupPath)
+			log.Printf("日志文件已备份为: %s", backupPath)
 		}
 	}
 
 	// 设置日志输出到文件
+	// 使用追加模式打开文件，如果文件不存在则创建
+	// 权限644（所有者可读写，组和其他用户可读）
 	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Printf("无法创建日志文件: %v", err)
 		return
 	}
 
-	// 设置日志输出到文件和控制台
+	// 设置日志同时输出到文件和控制台
+	// 这样既可以实时查看日志，又可以持久化保存
 	log.SetOutput(io.MultiWriter(os.Stdout, logFile))
+	log.Printf("日志文件设置为: %s", logPath)
 }
 
+// ==================== 主函数 ====================
+
+// main 程序入口函数
+//
+// 执行流程：
+// 1. 加载配置文件（支持通过命令行参数指定）
+// 2. 设置日志系统
+// 3. 打印启动信息
+// 4. 创建和配置HTTP服务器
+// 5. 启动服务器并开始监听请求
+//
+// 命令行用法：
+//
+//	./ghproxy                  # 使用默认配置文件 config.toml
+//	./ghproxy custom.toml      # 使用指定的配置文件
 func main() {
-	// 设置日志轮转 - 限制为5MB
+	// ========== 第一步：配置初始化 ==========
+
+	// 确定配置文件路径
+	// 默认使用当前目录下的 config.toml
+	// 如果提供了命令行参数，则使用指定的配置文件
+	configPath := "config.toml"
+	if len(os.Args) > 1 {
+		configPath = os.Args[1]
+	}
+
+	// 加载配置文件
+	// 如果加载失败，程序会终止并显示错误信息
+	if err := loadConfig(configPath); err != nil {
+		log.Fatalf("加载配置失败: %v", err)
+	}
+
+	// ========== 第1.5步：生成配置相关文件 ==========
+
+	// 自动生成配置相关的目录和示例文件
+	// 包括日志目录、配置目录、黑名单白名单示例等
+	if err := generateConfigFiles(); err != nil {
+		log.Printf("警告：生成配置文件时出现错误: %v", err)
+		// 不终止程序，继续运行
+	}
+
+	// ========== 第二步：日志系统初始化 ==========
+
+	// 设置日志轮转，确保日志文件不会无限增长
 	setupLogRotation()
 
-	// 打印版本信息
-	fmt.Printf("Git代码文件加速代理服务 v%s\n", Version)
-	fmt.Printf("构建时间: %s\n", BuildTime)
-	fmt.Printf("监听端口: :8080\n")
+	// ========== 第三步：显示启动信息 ==========
+
+	// 打印服务器配置信息
+	fmt.Printf("Git文件加速代理\n")
+	fmt.Printf("监听地址: %s:%d\n", config.Server.Host, config.Server.Port)
+	fmt.Printf("文件大小限制: %d MB\n", config.Server.SizeLimit)
 	fmt.Printf("支持平台: GitHub, GitLab, Hugging Face\n")
-	fmt.Printf("Web界面: http://127.0.0.1:8080\n")
+	fmt.Printf("Web界面: http://%s:%d\n", config.Server.Host, config.Server.Port)
 	fmt.Printf("=" + strings.Repeat("=", 50) + "\n")
 
-	// 创建自定义的处理器来避免Go的路径清理问题
+	// ========== 第四步：创建HTTP服务器 ==========
+
+	// 创建服务器监听地址
+	serverAddr := fmt.Sprintf("%s:%d", config.Server.Host, config.Server.Port)
+
+	// 创建自定义的HTTP服务器
+	// 使用自定义的处理器来避免Go标准库的路径清理问题
+	// 这对代理服务器很重要，因为我们需要保持URL的原始格式
 	server := &http.Server{
-		Addr: ":8080",
+		Addr: serverAddr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// 特殊处理API路由
+			// 路由分发：根据请求路径选择不同的处理器
+
+			// API路由：处理生成加速链接的API请求
+			// 路径：/api/generate
 			if strings.HasPrefix(r.URL.Path, "/api/generate") {
 				generateLinksAPI(w, r)
 				return
 			}
-			// 所有其他请求都走代理处理器
+
+			// 代理路由：处理所有其他请求（文件代理下载）
+			// 这是服务器的核心功能，代理访问GitHub、GitLab等平台的文件
 			proxyHandler(w, r)
 		}),
 	}
 
-	fmt.Printf("Git代码文件代理服务启动成功！\n")
-	log.Printf("服务版本: %s, 构建时间: %s", Version, BuildTime)
-	fmt.Printf("使用方法: http://127.0.0.1:8080/完整的文件URL\n")
+	// ========== 第五步：启动服务器 ==========
 
+	// 打印启动成功信息
+	fmt.Printf("Git文件加速代理启动成功！\n")
+	fmt.Printf("使用方法: http://%s:%d/完整的文件URL\n", config.Server.Host, config.Server.Port)
+
+	// 启动HTTP服务器并开始监听请求
+	// 这是一个阻塞调用，程序会一直运行直到服务器停止或出现致命错误
+	// 如果启动失败（如端口被占用），log.Fatal会终止程序并输出错误信息
 	log.Fatal(server.ListenAndServe())
 }
 
-// 转换各种平台的URL为raw格式
+// ==================== URL转换函数 ====================
+
+// convertURL 转换各种平台的URL为raw格式
+//
+// 参数：
+//
+//	u: 需要转换的URL对象
+//
+// 返回值：
+//
+//	*url.URL: 转换后的URL对象
+//
+// 功能说明：
+// 不同的代码托管平台有不同的URL格式：
+// - GitHub: 需要将blob链接转换为raw.githubusercontent.com
+// - GitLab: 需要将blob链接转换为raw链接
+// - Hugging Face: 需要将blob链接转换为resolve链接
+//
+// 这样转换后的URL可以直接下载文件内容，而不是显示网页
 func convertURL(u *url.URL) *url.URL {
 	switch u.Host {
 	case "github.com":
@@ -1053,7 +1737,27 @@ func convertURL(u *url.URL) *url.URL {
 	return u
 }
 
-// 转换GitHub URL为raw格式
+// convertGitHubURL 转换GitHub URL为raw格式
+//
+// 参数：
+//
+//	u: GitHub的URL对象
+//
+// 返回值：
+//
+//	*url.URL: 转换后的URL对象
+//
+// 转换规则：
+// 1. 将github.com的blob链接转换为raw.githubusercontent.com
+// 2. 移除路径中的"/blob/"部分
+// 3. 保持其他类型的路径不变（如仓库根路径、tree路径等）
+//
+// 示例转换：
+//
+//	输入: https://github.com/user/repo/blob/main/file.txt
+//	输出: https://raw.githubusercontent.com/user/repo/main/file.txt
+//
+// 这样转换后的URL可以直接下载文件内容
 func convertGitHubURL(u *url.URL) *url.URL {
 	if u.Host == "github.com" {
 		path := u.Path
@@ -1069,7 +1773,25 @@ func convertGitHubURL(u *url.URL) *url.URL {
 	return u
 }
 
-// 转换GitLab URL为raw格式
+// convertGitLabURL 转换GitLab URL为raw格式
+//
+// 参数：
+//
+//	u: GitLab的URL对象
+//
+// 返回值：
+//
+//	*url.URL: 转换后的URL对象
+//
+// 转换规则：
+// 1. 将gitlab.com的blob链接转换为raw链接
+// 2. 将路径中的"/-/blob/"替换为"/-/raw/"
+// 3. 保持其他类型的路径不变
+//
+// 示例转换：
+//
+//	输入: https://gitlab.com/user/repo/-/blob/main/file.txt
+//	输出: https://gitlab.com/user/repo/-/raw/main/file.txt
 func convertGitLabURL(u *url.URL) *url.URL {
 	if u.Host == "gitlab.com" {
 		path := u.Path
@@ -1118,8 +1840,42 @@ func convertHuggingFaceURL(u *url.URL) *url.URL {
 	return u
 }
 
-// 检查是否是支持的代码托管平台域名
+// ==================== 安全验证函数 ====================
+
+// isSupportedDomain 检查是否是支持的代码托管平台域名
+//
+// 参数：
+//
+//	host: 需要检查的域名
+//
+// 返回值：
+//
+//	bool: 如果域名被支持返回true，否则返回false
+//
+// 功能说明：
+// 这是一个重要的安全函数，用于防止代理服务器被滥用为通用代理。
+// 只有在白名单中的域名才会被允许代理访问。
+//
+// 支持的平台和域名：
+// 1. GitHub相关：
+//   - github.com: 主站
+//   - raw.githubusercontent.com: 原始文件服务
+//   - gist.githubusercontent.com: Gist文件服务
+//   - codeload.github.com: 下载服务
+//   - api.github.com: API服务
+//
+// 2. GitLab相关：
+//   - gitlab.com: 主站
+//   - gitlab.io: GitLab Pages
+//
+// 3. Hugging Face相关：
+//   - huggingface.co: 主站
+//   - hf.co: 短域名
+//   - cdn-lfs.huggingface.co: LFS CDN
+//   - cas-bridge.xethub.hf.co: CDN桥接服务
+//   - cdn-lfs.hf.co: LFS CDN短域名
 func isSupportedDomain(host string) bool {
+	// 定义所有允许的域名白名单
 	allowedDomains := []string{
 		// GitHub相关域名
 		"raw.githubusercontent.com",
@@ -1140,10 +1896,13 @@ func isSupportedDomain(host string) bool {
 		"cdn-lfs.hf.co",           // Hugging Face LFS CDN短域名
 	}
 
+	// 检查域名是否在白名单中
 	for _, domain := range allowedDomains {
 		if host == domain {
 			return true
 		}
 	}
+
+	// 域名不在白名单中，返回false
 	return false
 }
