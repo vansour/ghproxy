@@ -17,9 +17,8 @@ COPY go.mod go.sum ./
 # 下载依赖
 RUN go mod download
 
-# 复制源代码和配置文件
+# 复制源代码
 COPY main.go ./
-COPY config.toml ./
 
 # 构建应用（支持多架构）
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
@@ -47,15 +46,8 @@ ENV TZ=Asia/Shanghai
 # 设置工作目录
 WORKDIR /app
 
-# 从构建阶段复制可执行文件和配置文件
+# 从构建阶段复制可执行文件
 COPY --from=builder /app/ghproxy .
-COPY --from=builder /app/config.toml .
-
-# 创建必要的目录
-RUN mkdir -p ./config ./logs
-
-# 创建一个默认的favicon文件（空文件，可通过挂载覆盖）
-RUN touch ./favicon.ico
 
 # 确保可执行文件有执行权限
 RUN chmod +x ./ghproxy

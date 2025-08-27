@@ -22,21 +22,6 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # 获取完整的git历史，用于版本标记
-
-    - name: Prepare build context
-      run: |
-        echo "准备构建上下文..."
-        ls -la
-        # 确保必要的文件存在
-        if [ ! -f config.toml ]; then
-          echo "警告: config.toml 文件不存在"
-        fi
-        if [ ! -f favicon.ico ]; then
-          echo "警告: favicon.ico 文件不存在，将在容器中创建默认文件"
-        fi
-        echo "✓ 构建上下文准备完成"
 
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
@@ -69,18 +54,14 @@ jobs:
           type=semver,pattern={{major}}.{{minor}}
           type=raw,value=latest,enable={{is_default_branch}}
         labels: |
-          org.opencontainers.image.title=Git文件加速代理
-          org.opencontainers.image.description=支持GitHub、GitLab、Hugging Face的文件下载加速代理服务，支持配置文件自定义
+          org.opencontainers.image.title=Git代码文件加速代理服务
+          org.opencontainers.image.description=支持GitHub、GitLab、Hugging Face、SourceForge的多平台代理服务
           org.opencontainers.image.vendor=vansour
-          org.opencontainers.image.source=https://github.com/vansour/ghproxy
-          org.opencontainers.image.documentation=https://github.com/vansour/ghproxy/blob/main/README.md
 
     - name: Build and push Docker image
-      id: build
       uses: docker/build-push-action@v5
       with:
         context: .
-        file: ./Dockerfile
         platforms: linux/amd64,linux/arm64,linux/arm/v7
         push: ${{ github.event_name != 'pull_request' }}
         tags: ${{ steps.meta.outputs.tags }}
@@ -90,27 +71,6 @@ jobs:
         build-args: |
           BUILDTIME=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
           VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
-
-    - name: Test Docker image
-      if: github.event_name != 'pull_request'
-      run: |
-        echo "测试构建的镜像..."
-        # 运行容器进行基本测试
-        docker run --rm -d --name test-ghproxy -p 18080:8080 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-        
-        # 等待服务启动
-        sleep 10
-        
-        # 测试健康检查
-        if curl -f http://localhost:18080/ > /dev/null 2>&1; then
-          echo "✓ 镜像测试通过"
-        else
-          echo "✗ 镜像测试失败"
-          exit 1
-        fi
-        
-        # 停止测试容器
-        docker stop test-ghproxy
 
     - name: Image digest
       if: github.event_name != 'pull_request'
@@ -135,14 +95,6 @@ jobs:
         body: |
           ## 🚀 新版本发布 ${{ github.ref_name }}
           
-          ### ✨ 主要功能
-          - 支持 GitHub、GitLab、Hugging Face 文件加速下载
-          - 可配置的黑名单/白名单系统
-          - 速率限制和带宽控制
-          - 文件大小限制
-          - 自动日志轮转
-          - 多架构 Docker 镜像支持
-          
           ### 📦 Docker镜像
           
           支持多架构镜像：
@@ -154,59 +106,14 @@ jobs:
           - `linux/arm64` - ARM64 (Apple Silicon, ARM服务器)
           - `linux/arm/v7` - ARM v7 (树莓派等)
           
-          ### 🔧 快速部署
-          
-          #### 方式一：Docker 一键部署
+          ### 🔧 一键安装
           ```bash
-          # 下载部署脚本
-          wget https://raw.githubusercontent.com/vansour/ghproxy/main/deploy.sh
-          chmod +x deploy.sh
-          
-          # 一键安装
-          ./deploy.sh install
+          wget https://raw.githubusercontent.com/vansour/ghproxy/main/install.sh -O ghproxy.sh && chmod +x ./ghproxy.sh && ./ghproxy.sh
           ```
           
-          #### 方式二：Docker Compose
+          ### 🐳 Docker运行
           ```bash
-          # 创建部署目录
-          mkdir ghproxy && cd ghproxy
-          
-          # 下载配置文件
-          wget https://raw.githubusercontent.com/vansour/ghproxy/main/docker-compose.yml
-          wget https://raw.githubusercontent.com/vansour/ghproxy/main/config.toml
-          
-          # 启动服务
-          docker-compose up -d
-          ```
-          
-          #### 方式三：Docker 直接运行
-          ```bash
-          # 简单运行
           docker run -d --name ghproxy -p 8080:8080 vansour/ghproxy:${{ github.ref_name }}
-          
-          # 带配置文件运行
-          docker run -d --name ghproxy -p 8080:8080 \
-            -v $(pwd)/config.toml:/app/config.toml:ro \
-            -v $(pwd)/config:/app/config \
-            -v $(pwd)/logs:/app/logs \
-            vansour/ghproxy:${{ github.ref_name }}
           ```
-          
-          ### ⚙️ 配置说明
-          
-          - 配置文件：`config.toml` - 主配置文件
-          - 黑名单：`config/blacklist.json` - 阻止访问的域名/IP列表  
-          - 白名单：`config/whitelist.json` - 允许访问的域名/IP列表
-          - 日志文件：`logs/ghproxy.log` - 访问日志
-          
-          ### 🌐 访问地址
-          
-          服务启动后访问：http://localhost:8080
-          
-          ### 📚 更多信息
-          
-          - [使用文档](https://github.com/vansour/ghproxy/blob/main/README.md)
-          - [Docker部署说明](https://github.com/vansour/ghproxy/blob/main/DOCKER.md)
-          - [配置文件说明](https://github.com/vansour/ghproxy/blob/main/config.toml)
         draft: false
         prerelease: false
